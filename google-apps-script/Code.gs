@@ -280,7 +280,9 @@ function handleToggleSpesa(payload) {
  * Elimina uno o più articoli dalla Spesa
  */
 function handleDeleteSpesa(payload) {
-  const idsToDelete = Array.isArray(payload.ids) ? payload.ids : (payload.id ? [payload.id] : []);
+  const idsToDelete = Array.isArray(payload) 
+    ? payload 
+    : (Array.isArray(payload.ids) ? payload.ids : (payload.id ? [payload.id] : []));
   if (idsToDelete.length === 0) {
     return { success: false, error: "Nessun ID fornito per l'eliminazione." };
   }

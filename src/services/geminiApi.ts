@@ -1,8 +1,45 @@
 import { DispensaItem, ParsedPantryItem, Ricetta, Reparto } from '../types';
 import { INITIAL_MOCK_RICETTE } from './mockData';
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+
+async function requestGemini(apiKey: string, prompt: string, temperature: number = 0.2): Promise<string> {
+  let lastError: any = null;
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature
+          }
+        })
+      });
+
+      if (response.ok) {
+        const jsonRes = await response.json();
+        const text = jsonRes?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) return text;
+      } else {
+        const errText = await response.text();
+        lastError = new Error(`HTTP ${response.status} (${model}): ${errText}`);
+        // If 404 (model not found), continue to fallback model
+        if (response.status === 404) {
+          continue;
+        }
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  throw lastError || new Error('Chiamata Gemini fallita');
+}
 
 /**
  * Chiama l'API di Gemini per estrarre ingredienti strutturati da linguaggio naturale o dettatura vocale.
@@ -42,31 +79,7 @@ Ogni oggetto DEVE avere i seguenti campi:
 Rispondi ESCLUSIVAMENTE con un array JSON valido, senza testo o blocchi markdown all'infuori del JSON.`;
 
   try {
-    const response = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey.trim()}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.1
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.warn('Gemini API call failed, falling back:', errText);
-      return parsePantryFallback(rawText);
-    }
-
-    const jsonRes = await response.json();
-    const candidateText = jsonRes?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidateText = await requestGemini(apiKey, prompt, 0.1);
 
     if (!candidateText) {
       return parsePantryFallback(rawText);
@@ -148,30 +161,7 @@ Restituisci ESCLUSIVAMENTE un array JSON con questa struttura esatta:
 ]`;
 
   try {
-    const response = await fetch(`${GEMINI_ENDPOINT}?key=${apiKey.trim()}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.3
-        }
-      })
-    });
-
-    if (!response.ok) {
-      console.warn('Gemini Ricette call failed, fallback mock.');
-      return filterMockRecipes(dispensaItems, tempoMaxMinuti);
-    }
-
-    const jsonRes = await response.json();
-    const candidateText = jsonRes?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidateText = await requestGemini(apiKey, prompt, 0.3);
 
     if (!candidateText) {
       return filterMockRecipes(dispensaItems, tempoMaxMinuti);
