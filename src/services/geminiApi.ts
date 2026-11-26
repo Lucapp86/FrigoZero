@@ -42,6 +42,179 @@ async function requestGemini(apiKey: string, prompt: string, temperature: number
 }
 
 /**
+ * Esegue una richiesta multimodale (Visione + Testo) a Gemini con fallback sui modelli disponibili.
+ */
+async function requestGeminiVision(
+  apiKey: string,
+  prompt: string,
+  base64: string,
+  mimeType: string = 'image/jpeg',
+  temperature: number = 0.1
+): Promise<string> {
+  let lastError: any = null;
+  const cleanBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey.trim()}`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: mimeType || 'image/jpeg',
+                    data: cleanBase64
+                  }
+                },
+                {
+                  text: prompt
+                }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature
+          }
+        })
+      });
+
+      if (response.ok) {
+        const jsonRes = await response.json();
+        const text = jsonRes?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) return text;
+      } else {
+        const errText = await response.text();
+        lastError = new Error(`HTTP ${response.status} (${model}): ${errText}`);
+        if (response.status === 404) {
+          continue;
+        }
+      }
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  throw lastError || new Error('Chiamata Gemini Vision fallita');
+}
+
+/**
+ * Analizza un'immagine (scontrino o foto del frigo/dispensa) tramite Gemini Vision (gemini-2.5-flash).
+ * Riconosce automaticamente il tipo di immagine, estrae gli alimenti e restituisce un array JSON
+ * conforme allo schema ParsedPantryItem.
+ */
+export async function analyzeFoodImage(
+  base64: string,
+  mimeType: string = 'image/jpeg',
+  apiKey?: string
+): Promise<ParsedPantryItem[]> {
+  // Se non c'è la chiave API o siamo in modalità demo, simula 3-4 alimenti da scontrino
+  if (!apiKey || apiKey.trim() === '') {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const today = new Date();
+    const addDays = (days: number) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() + days);
+      return d.toISOString().split('T')[0];
+    };
+
+    return [
+      {
+        ingrediente: 'Latte parzialmente scremato',
+        quantita: '1L',
+        reparto: 'Frigo/Latticini',
+        scadenza_stimata: addDays(6),
+        urgenza: 'media'
+      },
+      {
+        ingrediente: 'Petto di pollo a fette',
+        quantita: '400g',
+        reparto: 'Carne/Pesce',
+        scadenza_stimata: addDays(2),
+        urgenza: 'alta'
+      },
+      {
+        ingrediente: 'Mele Golden',
+        quantita: '1kg',
+        reparto: 'Ortofrutta',
+        scadenza_stimata: addDays(5),
+        urgenza: 'media'
+      },
+      {
+        ingrediente: 'Pasta di semola Penne',
+        quantita: '500g',
+        reparto: 'Dispensa',
+        scadenza_stimata: addDays(90),
+        urgenza: 'bassa'
+      }
+    ];
+  }
+
+  const todayIso = new Date().toISOString().split('T')[0];
+
+  const prompt = `Sei l'assistente IA visivo di "FrigoZero", un'applicazione anti-spreco alimentare.
+Analizza con attenzione l'immagine fornita.
+
+L'immagine può appartenere a uno di questi due casi:
+1. SCONTRINO DELLA SPESA:
+   - Riconosci ed estrai ESCLUSIVAMENTE i prodotti alimentari e le bevande commestibili.
+   - ESCLUDI CATEGORICAMENTE tutti i prodotti non alimentari: detersivi, detergenti, bagnoschiuma, carta assorbente/igienica, sacchetti spesa/bio, pile, articoli per la casa.
+   - ESCLUDI CATEGORICAMENTE sconti, coupon, subtotali, totali, codici a barre, orari, date e dettagli del negozio.
+   - Decodifica e traduci le abbreviazioni commerciali tipiche dei registratori di cassa in nomi italiani chiari, naturali e completi (ad es. "LAT.PS.1L" -> "Latte parzialmente scremato", quantita "1L"; "POMOD.CILIEG" -> "Pomodori ciliegino"; "PETTO POLL.F." -> "Petto di pollo a fette"; "MOZZ.VALLEL.3X100" -> "Mozzarella", quantita "3x100g").
+   - Estrai la quantità o grammatura se indicata, altrimenti imposta "1".
+
+2. FOTO DI ALIMENTI / INTERNO FRIGO / DISPENSA / TAVOLO:
+   - Riconosci tutti gli alimenti visibili singolarmente.
+   - Stima una quantità approssimativa ragionevole (es. "4", "500g", "1 confezione", "1 bottiglia", "1 cespo").
+
+Per ogni alimento individuato, compila un oggetto JSON con questi campi:
+- "ingrediente": stringa, nome chiaro in italiano con iniziale maiuscola (es. "Zucchine", "Latte parzialmente scremato")
+- "quantita": stringa, quantità indicata o stimata (es. "1", "500g", "1L", "6 uova")
+- "reparto": uno tra "Ortofrutta", "Frigo/Latticini", "Carne/Pesce", "Dispensa", "Surgelati", "Altro"
+- "scadenza_stimata": data stimata di scadenza in formato ISO YYYY-MM-DD. Oggi è ${todayIso}.
+  Criteri di stima della scadenza a partire da oggi:
+  * Carne o pesce freschi -> da +2 a +3 giorni da oggi.
+  * Ortofrutta fresca -> da +4 a +6 giorni da oggi.
+  * Frigo/Latticini (latte, formaggi freschi, yogurt, uova) -> da +5 a +8 giorni da oggi.
+  * Dispensa secca (pasta, riso, legumi secchi/scatolame, farina) -> da +60 a +90 giorni da oggi.
+  * Surgelati -> da +90 a +120 giorni da oggi.
+- "urgenza": uno tra "alta" (se scade entro 2 giorni), "media" (3-5 giorni), "bassa" (oltre 5 giorni).
+
+Rispondi ESCLUSIVAMENTE con un array JSON di oggetti. Se l'immagine non contiene alcun alimento, rispondi con un array vuoto [].
+Non inserire spiegazioni, introduzioni o testo aggiuntivo fuori dal JSON.`;
+
+  try {
+    const candidateText = await requestGeminiVision(apiKey, prompt, base64, mimeType, 0.1);
+
+    if (!candidateText) {
+      return [];
+    }
+
+    const cleanedJson = cleanJsonString(candidateText);
+    const parsed = JSON.parse(cleanedJson);
+
+    if (Array.isArray(parsed)) {
+      return parsed.map(sanitizeParsedItem);
+    } else if (typeof parsed === 'object' && parsed !== null) {
+      const items = (parsed as any).items || (parsed as any).ingredienti || (parsed as any).prodotti || [parsed];
+      if (Array.isArray(items)) {
+        return items.map(sanitizeParsedItem);
+      }
+    }
+
+    return [];
+  } catch (error) {
+    console.error('Errore durante l\'analisi dell\'immagine con Gemini Vision:', error);
+    throw error;
+  }
+}
+
+/**
  * Chiama l'API di Gemini per estrarre ingredienti strutturati da linguaggio naturale o dettatura vocale.
  */
 export async function parsePantryInputWithGemini(

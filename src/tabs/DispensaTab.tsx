@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Sparkles, 
   Trash2, 
@@ -9,11 +9,14 @@ import {
   Calendar,
   AlertTriangle,
   Layers,
-  Utensils
+  Utensils,
+  Camera
 } from 'lucide-react';
-import { DispensaItem, Reparto, Urgenza, AppSettings } from '../types';
+import { DispensaItem, Reparto, Urgenza, AppSettings, ParsedPantryItem } from '../types';
 import { VoiceInputButton } from '../components/VoiceInputButton';
-import { parsePantryInputWithGemini } from '../services/geminiApi';
+import { FoodScanReviewModal } from '../components/FoodScanReviewModal';
+import { parsePantryInputWithGemini, analyzeFoodImage } from '../services/geminiApi';
+import { resizeImageToBase64 } from '../utils/imageUtils';
 
 interface DispensaTabProps {
   items: DispensaItem[];
@@ -45,6 +48,12 @@ export const DispensaTab: React.FC<DispensaTabProps> = ({
   const [selectedUrgency, setSelectedUrgency] = useState<string>('all');
   const [selectedReparto, setSelectedReparto] = useState<string>('all');
   const [showManualAdd, setShowManualAdd] = useState(false);
+
+  // Scansione fotografica (scontrino / frigo)
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const [scannedItems, setScannedItems] = useState<ParsedPantryItem[]>([]);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
 
   // Form manuale
   const [manualName, setManualName] = useState('');
@@ -101,6 +110,42 @@ export const DispensaTab: React.FC<DispensaTabProps> = ({
   // Dettatura vocale trascritta
   const handleVoiceTranscript = (text: string) => {
     setNaturalInput(prev => prev ? `${prev}, ${text}` : text);
+  };
+
+  // Gestione scansione fotografica (scontrino o frigo/dispensa)
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+
+    if (!file) return;
+
+    setIsAnalyzingImage(true);
+    try {
+      // 1. Compressione immagine lato client (Canvas HTML5)
+      const { base64, mimeType } = await resizeImageToBase64(file, 1024, 0.75);
+
+      // 2. Chiamata a Gemini Vision (gemini-2.5-flash) o mock se in demo
+      const itemsFound = await analyzeFoodImage(base64, mimeType, settings.geminiApiKey);
+
+      if (itemsFound && itemsFound.length > 0) {
+        setScannedItems(itemsFound);
+        setIsReviewModalOpen(true);
+      } else {
+        alert('Nessun alimento riconosciuto nell\'immagine. Prova con una foto più nitida o ravvicinata.');
+      }
+    } catch (err: any) {
+      console.error('Errore durante l\'analisi dell\'immagine:', err);
+      alert('Errore durante l\'analisi dell\'immagine: ' + (err.message || 'Errore sconosciuto'));
+    } finally {
+      setIsAnalyzingImage(false);
+    }
+  };
+
+  // Conferma salvataggio alimenti riconosciuti via addDispensa
+  const handleConfirmScannedItems = async (confirmedItems: Omit<DispensaItem, 'id'>[]) => {
+    await onAddItems(confirmedItems);
+    setIsReviewModalOpen(false);
+    setScannedItems([]);
   };
 
   // Calcolo giorni rimanenti e badge
@@ -178,18 +223,44 @@ export const DispensaTab: React.FC<DispensaTabProps> = ({
             onChange={(e) => setNaturalInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAiAdd()}
             placeholder="es. uova, 2 zucchine, latte in scadenza, petto di pollo..."
-            className="flex-1 bg-slate-950/70 border border-slate-700/80 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none transition-all"
-            disabled={isProcessingAi}
+            className="flex-1 min-w-0 bg-slate-950/70 border border-slate-700/80 focus:border-emerald-500 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none transition-all"
+            disabled={isProcessingAi || isAnalyzingImage}
           />
           
           <VoiceInputButton 
             onTranscript={handleVoiceTranscript} 
-            disabled={isProcessingAi} 
+            disabled={isProcessingAi || isAnalyzingImage} 
+          />
+
+          {/* Pulsante Fotocamera per Scansione Scontrino o Frigo */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isProcessingAi || isAnalyzingImage}
+            aria-label="Scansiona scontrino o frigo"
+            title="Scansiona scontrino o frigo"
+            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 active:scale-95 disabled:opacity-50 transition-all shrink-0 flex items-center justify-center"
+          >
+            {isAnalyzingImage ? (
+              <div className="w-5 h-5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Camera className="w-5 h-5 text-emerald-400" />
+            )}
+          </button>
+
+          {/* Input file nascosto con capture environment per fotocamera e galleria */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleImageSelect}
           />
 
           <button
             onClick={handleAiAdd}
-            disabled={isProcessingAi || !naturalInput.trim()}
+            disabled={isProcessingAi || isAnalyzingImage || !naturalInput.trim()}
             className="px-4 py-2.5 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 flex items-center space-x-1.5 shadow-md shadow-emerald-500/20 active:scale-95 transition-all shrink-0"
           >
             {isProcessingAi ? (
@@ -206,8 +277,16 @@ export const DispensaTab: React.FC<DispensaTabProps> = ({
           </button>
         </div>
         
+        {/* Stato di caricamento analisi foto */}
+        {isAnalyzingImage && (
+          <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-2.5 mt-2.5 animate-pulse">
+            <div className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin shrink-0" />
+            <span className="font-medium">Analisi immagine in corso (scontrino o frigo)...</span>
+          </div>
+        )}
+
         <p className="text-[11px] text-slate-400 mt-2 flex items-center gap-1">
-          💡 Scrivi o detta a voce più alimenti insieme: Gemini stimerà automaticamente reparto e scadenza.
+          💡 Scrivi, detta a voce o fotografa scontrini e alimenti: Gemini stimerà automaticamente reparto e scadenza.
         </p>
       </div>
 
@@ -468,6 +547,14 @@ export const DispensaTab: React.FC<DispensaTabProps> = ({
       <div className="pt-2 text-center text-xs text-slate-500">
         Totale ingredienti: <strong className="text-slate-400">{items.length}</strong> • Urgenza alta: <strong className="text-rose-400">{urgentCount}</strong>
       </div>
+
+      {/* Modale di Revisione Rapida Alimenti Riconosciuti */}
+      <FoodScanReviewModal
+        isOpen={isReviewModalOpen}
+        onClose={() => setIsReviewModalOpen(false)}
+        items={scannedItems}
+        onConfirm={handleConfirmScannedItems}
+      />
 
     </div>
   );
