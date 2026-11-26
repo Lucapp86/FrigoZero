@@ -1,7 +1,12 @@
 import { DispensaItem, ParsedPantryItem, Ricetta, Reparto } from '../types';
 import { INITIAL_MOCK_RICETTE } from './mockData';
 
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+const GEMINI_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-flash-latest',
+  'gemini-2.5-flash',
+  'gemini-1.5-flash'
+];
 
 async function requestGemini(apiKey: string, prompt: string, temperature: number = 0.2): Promise<string> {
   let lastError: any = null;
@@ -28,8 +33,8 @@ async function requestGemini(apiKey: string, prompt: string, temperature: number
       } else {
         const errText = await response.text();
         lastError = new Error(`HTTP ${response.status} (${model}): ${errText}`);
-        // If 404 (model not found), continue to fallback model
-        if (response.status === 404) {
+        // If 404 (model not found) or 503 (temporary high demand), continue to fallback model
+        if (response.status === 404 || response.status === 503) {
           continue;
         }
       }
@@ -91,7 +96,7 @@ async function requestGeminiVision(
       } else {
         const errText = await response.text();
         lastError = new Error(`HTTP ${response.status} (${model}): ${errText}`);
-        if (response.status === 404) {
+        if (response.status === 404 || response.status === 503) {
           continue;
         }
       }
