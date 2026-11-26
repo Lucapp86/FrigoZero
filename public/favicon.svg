@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#047857" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#grad)" filter="url(#shadow)" />
+
+  <!-- Refrigerator Body -->
+  <rect x="130" y="90" width="252" height="332" rx="28" fill="#ffffff" />
+  
+  <!-- Freezer Line divider -->
+  <line x1="130" y1="210" x2="382" y2="210" stroke="#059669" stroke-width="6" stroke-linecap="round" />
+
+  <!-- Fridge Top Handle -->
+  <rect x="154" y="140" width="12" height="42" rx="6" fill="#059669" />
+
+  <!-- Fridge Bottom Handle -->
+  <rect x="154" y="240" width="12" height="70" rx="6" fill="#059669" />
+
+  <!-- Fresh Spark / Leaf Badge in upper right -->
+  <circle cx="370" cy="115" r="46" fill="url(#accent)" />
+  <path d="M 360 92 C 385 92 396 110 394 134 C 370 134 352 122 352 98 Z" fill="#ffffff" />
+  <path d="M 352 98 C 362 115 372 122 388 128" stroke="#f59e0b" stroke-width="3" stroke-linecap="round" />
+</svg>
