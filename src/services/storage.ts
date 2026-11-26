@@ -6,10 +6,10 @@ const LOCAL_DISPENSA_KEY = 'frigo_zero_dispensa_v1';
 const LOCAL_SPESA_KEY = 'frigo_zero_spesa_v1';
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  gasUrl: '',
+  gasUrl: 'https://script.google.com/macros/s/AKfycbxzD-JYeIjPoPugfD9O2Yez6utzDq-rsHhIFJ-9Iszq9VLzCpHdXOZLUQweonrtfawRpw/exec',
   secretToken: '',
   geminiApiKey: '',
-  demoMode: true, // Attiva Demo Mode per impostazione predefinita se non configurato
+  demoMode: false,
 };
 
 export function loadSettings(): AppSettings {
@@ -18,10 +18,10 @@ export function loadSettings(): AppSettings {
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw);
     return {
-      gasUrl: parsed.gasUrl || '',
+      gasUrl: parsed.gasUrl || DEFAULT_SETTINGS.gasUrl,
       secretToken: parsed.secretToken || '',
       geminiApiKey: parsed.geminiApiKey || '',
-      demoMode: parsed.demoMode !== undefined ? parsed.demoMode : (!parsed.gasUrl && !parsed.geminiApiKey)
+      demoMode: parsed.demoMode !== undefined ? parsed.demoMode : false
     };
   } catch (e) {
     console.error('Errore nel caricamento impostazioni:', e);
